@@ -26,6 +26,8 @@ public class ServerSecureProtocol {
     private static final int STARTCIPHERCHANGE = 4;
 
     private static final int ENCRYPTIONOK = 5;
+    private static String modp2048Modulas = "FFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD129024E088A67CC74020BBEA63B139B22514A08798E3404DDEF9519B3CD3A431B302B0A6DF25F14374FE1356D6D51C245E485B576625E7EC6F44C42E9A637ED6B0BFF5CB6F406B7EDEE386BFB5A899FA5AE9F24117C4B1FE649286651ECE45B3DC2007CB8A163BF0598DA48361C55D39A69163FA8FD24CF5F83655D23DCA3AD961C62F356208552BB9ED529077096966D670C354E4ABC9804F1746C08CA18217C32905E462E36CE3BE39E772C180E86039B2783A2EC07A28FB5C55DF06F4C52C9DE2BCBF6955817183995497CEA956AE515D2261898FA051015728E5A8AACAA68FFFFFFFFFFFFFFFF";
+    private final BigInteger modp2048Base = BigInteger.valueOf(2);
     public boolean encryptionDone = false;
     protected byte[] sharedSecret;
     private int state = WAITING;
@@ -37,11 +39,6 @@ public class ServerSecureProtocol {
     private byte[] sessionKey;
     private KeyAgreement serverKeyAgree;
     private long counter = 0;
-
-    private  final BigInteger modp2048Base = BigInteger.valueOf(2);
-
-    private static String modp2048Modulas = "FFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD129024E088A67CC74020BBEA63B139B22514A08798E3404DDEF9519B3CD3A431B302B0A6DF25F14374FE1356D6D51C245E485B576625E7EC6F44C42E9A637ED6B0BFF5CB6F406B7EDEE386BFB5A899FA5AE9F24117C4B1FE649286651ECE45B3DC2007CB8A163BF0598DA48361C55D39A69163FA8FD24CF5F83655D23DCA3AD961C62F356208552BB9ED529077096966D670C354E4ABC9804F1746C08CA18217C32905E462E36CE3BE39E772C180E86039B2783A2EC07A28FB5C55DF06F4C52C9DE2BCBF6955817183995497CEA956AE515D2261898FA051015728E5A8AACAA68FFFFFFFFFFFFFFFF";
-
 
     public String processInput(String theInput) throws Exception {
         String theOutput = null;
@@ -169,19 +166,15 @@ public class ServerSecureProtocol {
 
                 state = STARTCLIENTAUTH;
 
-                byte[] time = ByteBuffer.allocate(Long.BYTES).putLong(System.currentTimeMillis()).array();
-                SecureRandom random = new SecureRandom();
-                byte rand[] = new byte[1854 - Long.BYTES];
+                SecureRandom random = SecureRandom.getInstanceStrong();
+                byte rand[] = new byte[1854];
                 random.nextBytes(rand);
 
-                byte[] bytes = new byte[1854];
 
                 sessionKey = rand;
-                System.arraycopy(time, 0, bytes, 0, time.length);
-                System.arraycopy(rand, 0, bytes, time.length, rand.length);
 
 
-                byte[] message = CryptoStuff.encryptRSA(clientPublicKey, bytes);
+                byte[] message = CryptoStuff.encryptRSA(clientPublicKey, rand);
 
                 String payload = Base64.encodeBase64String(message);
 
@@ -203,35 +196,20 @@ public class ServerSecureProtocol {
 
                 System.out.println(DatatypeConverter.printHexBinary(plainText));
 
-                ByteBuffer bb = ByteBuffer.wrap(Arrays.copyOfRange(plainText, 0, Long.BYTES));
 
-                byte[] receivedSessionKey = Arrays.copyOfRange(plainText, Long.BYTES, plainText.length);
-                if (!Arrays.equals(sessionKey, receivedSessionKey)) {
+                if (!Arrays.equals(sessionKey, plainText)) {
                     throw new Exception("Session key not equal!");
                 }
 
-                long serverTime = bb.getLong();
-
-                if (serverTime < System.currentTimeMillis() + 30000 && serverTime > System.currentTimeMillis() - 30000) {
 
                     byte[] dhParm = DatatypeConverter.parseHexBinary(modp2048Modulas);
 
-
-
-
                     BigInteger modp2048Mod = new BigInteger(1, dhParm);
 
-
-                  //  AlgorithmParameterGenerator paramGen = AlgorithmParameterGenerator.getInstance("DH");
-                   // System.out.println("Generating DH param");
-                   // paramGen.init(1024);
-                  //  AlgorithmParameters params = paramGen.generateParameters();
-                  //  DHParameterSpec dhSkipParamSpec = params.getParameterSpec(DHParameterSpec.class);
-
-                    DHParameterSpec dhSkipParamSpec = new DHParameterSpec(modp2048Mod,modp2048Base);
+                DHParameterSpec dhParameterSpec = new DHParameterSpec(modp2048Mod, modp2048Base);
 
                     KeyPairGenerator serverKpairGen = KeyPairGenerator.getInstance("DH");
-                    serverKpairGen.initialize(dhSkipParamSpec);
+                serverKpairGen.initialize(dhParameterSpec);
                     KeyPair serverKpair = serverKpairGen.generateKeyPair();
 
                     System.out.println("Initialization DH ...");
@@ -246,9 +224,7 @@ public class ServerSecureProtocol {
                     state = STARTDHEXCHANGE;
                     theOutput = "ServerKeyExchange:::" + encryptedDH + ":::ServerKeyExchangeDone";
 
-                } else {
-                    throw new Exception("Time difference between server and client is too wide.");
-                }
+
             } else {
                 theOutput = null;
             }
@@ -268,9 +244,15 @@ public class ServerSecureProtocol {
 
                 System.out.println("KEY: " + Base64.encodeBase64String(sharedSecret));
 
-                String hmacMessage = Base64.encodeBase64String(CryptoStuff.generateHMAC(sharedSecret, sessionKey));
+                SecureRandom random = SecureRandom.getInstanceStrong();
 
-                theOutput = "ChangeCipherSpec:::" + hmacMessage + ":::ServerDone";
+                byte rand[] = new byte[2048];
+                random.nextBytes(rand);
+
+
+                String hmacMessage = Base64.encodeBase64String(CryptoStuff.generateHMAC(sharedSecret, rand));
+
+                theOutput = "ChangeCipherSpec:::" + Base64.encodeBase64String(rand) + ":::" + hmacMessage + ":::ServerDone";
 
                 System.out.println(Base64.encodeBase64String(sessionKey));
 
@@ -280,21 +262,24 @@ public class ServerSecureProtocol {
             }
         } else if (state == STARTCIPHERCHANGE) {
             if (theInput.startsWith("ChangeCipherSpec:::") && theInput.endsWith(":::ClientDone")) {
-                byte[] cipherText = Base64.decodeBase64(theInput.split(":::")[1]);
-                byte[] iv = Arrays.copyOfRange(sessionKey, 0, 16);
+                byte[] revRand = Base64.decodeBase64(theInput.split(":::")[1]);
+                byte[] revHmac = Base64.decodeBase64(theInput.split(":::")[2]);
 
 
-                byte[] plainText = CryptoStuff.decryptAES(sharedSecret, cipherText, iv);
+                byte[] compHmac = CryptoStuff.generateHMAC(sharedSecret, revRand);
 
-                if (Arrays.equals(plainText, sessionKey)) {
+                if (Arrays.equals(revHmac, compHmac)) {
                     state = ENCRYPTIONOK;
                     encryptionDone = true;
+
                 } else {
-                    theOutput = "Decryption of Session Key Failed!";
+                    throw new Exception("HMAC Verification Failed!");
                 }
             }
         } else if (state == ENCRYPTIONOK) {
             byte[] key = ArrayUtils.addAll(sharedSecret, ByteBuffer.allocate(Long.BYTES).putLong(counter).array());
+
+            byte[] genKey = CryptoStuff.generateHMAC(sessionKey, key);
 
             int offset = (int) (Math.abs((sessionKey[0]) + counter) % (sessionKey.length - 16));
 
@@ -303,7 +288,7 @@ public class ServerSecureProtocol {
             String cipherText = theInput.split(":::")[0];
             byte[] hmac = Base64.decodeBase64(theInput.split(":::")[1]);
 
-            byte [] calHMAC = CryptoStuff.generateHMAC(key,cipherText.getBytes());
+            byte[] calHMAC = CryptoStuff.generateHMAC(genKey, cipherText.getBytes());
 
             if(!Arrays.equals(hmac,calHMAC)){
                 throw new Exception("Message has ben tampered with.");
@@ -312,7 +297,7 @@ public class ServerSecureProtocol {
 
 
             byte[] bCipherText = Base64.decodeBase64(cipherText);
-            byte[] plainText = CryptoStuff.decryptAES(key, bCipherText, iv);
+            byte[] plainText = CryptoStuff.decryptAES(genKey, bCipherText, iv);
             counter++;
             System.out.println("Plaintext: "+new String(plainText));
             theOutput = "";

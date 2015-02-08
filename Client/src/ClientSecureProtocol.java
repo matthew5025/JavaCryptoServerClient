@@ -1,8 +1,6 @@
 import org.apache.commons.codec.binary.Base64;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang.ArrayUtils;
-import org.kohsuke.rngom.parse.host.Base;
-import org.mozilla.javascript.EcmaError;
 
 import javax.crypto.KeyAgreement;
 import javax.crypto.interfaces.DHPublicKey;
@@ -11,10 +9,7 @@ import java.io.*;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Paths;
-import java.security.KeyFactory;
-import java.security.KeyPair;
-import java.security.KeyPairGenerator;
-import java.security.PublicKey;
+import java.security.*;
 import java.security.spec.X509EncodedKeySpec;
 import java.util.Arrays;
 
@@ -202,34 +197,15 @@ public class ClientSecureProtocol {
 
                 byte[] plainText = CryptoStuff.decryptRSA(privateKeyPath, cipherText);
 
-                ByteBuffer bb = ByteBuffer.wrap(Arrays.copyOfRange(plainText, 0, Long.BYTES));
-
-                long serverTime = bb.getLong();
-
-                if (serverTime < System.currentTimeMillis() + 30000 && serverTime > System.currentTimeMillis() - 30000) {
                     System.out.println("Server identity verified. Now authenticating ourselves with the server. . .");
 
                     String payload = Base64.encodeBase64String(CryptoStuff.encryptRSA(serverPublicKey, plainText));
 
-                    byte[] time = ByteBuffer.allocate(Long.BYTES).putLong(System.currentTimeMillis()).array();
+                sessionKey = plainText;
 
-                    byte rand[] = Arrays.copyOfRange(plainText, Long.BYTES, plainText.length);
-
-
-                    sessionKey = rand;
-
-                    byte[] bytes = new byte[1854];
-
-                    System.arraycopy(time, 0, bytes, 0, time.length);
-                    System.arraycopy(rand, 0, bytes, time.length, rand.length);
                     theOutput = "StartClientServerAuth:::" + payload + ":::ClientSessionDone";
 
                     state = SENTCLIENTAUTH;
-
-
-                } else {
-                    throw new Exception("Time difference between client and server is too wide.");
-                }
 
             } else {
                 return null;
@@ -278,21 +254,26 @@ public class ClientSecureProtocol {
 
                 System.out.println("We will now check the validity of the master key. . .");
 
-                byte[] revHmac = Base64.decodeBase64(theInput.split(":::")[1]);
+                byte[] revRand = Base64.decodeBase64(theInput.split(":::")[1]);
+                byte[] revHmac = Base64.decodeBase64(theInput.split(":::")[2]);
 
-                byte[] compHmac = CryptoStuff.generateHMAC(sharedSecret, sessionKey);
+
+                byte[] compHmac = CryptoStuff.generateHMAC(sharedSecret, revRand);
 
 
                 if (Arrays.equals(revHmac, compHmac)) {
 
                     System.out.println("Master key verification OK!");
 
-                    byte[] iv = Arrays.copyOfRange(sessionKey, 0, 16);
+                    SecureRandom random = SecureRandom.getInstanceStrong();
 
-                    byte encSession[] = CryptoStuff.encryptAES(sharedSecret, sessionKey, iv);
+                    byte rand[] = new byte[2048];
+                    random.nextBytes(rand);
 
-                    String out = Base64.encodeBase64String(encSession);
-                    theOutput = "ChangeCipherSpec:::" + out + ":::ClientDone";
+
+                    String hmacMessage = Base64.encodeBase64String(CryptoStuff.generateHMAC(sharedSecret, rand));
+
+                    theOutput = "ChangeCipherSpec:::" + Base64.encodeBase64String(rand) + ":::" + hmacMessage + ":::ClientDone";
 
                     System.out.println("Informing server we will now start encryption.");
 
@@ -306,13 +287,15 @@ public class ClientSecureProtocol {
         } else if (state == ENCRYPTIONDONE) {
             byte[] key = ArrayUtils.addAll(sharedSecret, ByteBuffer.allocate(Long.BYTES).putLong(counter).array());
 
+            byte[] genKey = CryptoStuff.generateHMAC(sessionKey, key);
+
             int offset = (int) (Math.abs((sessionKey[0]) + counter) % (sessionKey.length - 16));
 
             byte[] iv = Arrays.copyOfRange(sessionKey, offset, 16 + offset);
 
-            String encrypted = Base64.encodeBase64String(CryptoStuff.encryptAES(key, theInput.getBytes(), iv));
+            String encrypted = Base64.encodeBase64String(CryptoStuff.encryptAES(genKey, theInput.getBytes(), iv));
 
-            String hmac = Base64.encodeBase64String(CryptoStuff.generateHMAC(key,encrypted.getBytes()));
+            String hmac = Base64.encodeBase64String(CryptoStuff.generateHMAC(genKey, encrypted.getBytes()));
 
             theOutput = encrypted+":::"+hmac;
             counter++;

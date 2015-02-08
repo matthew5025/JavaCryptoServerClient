@@ -4,7 +4,10 @@ import javax.crypto.SecretKey;
 import javax.crypto.spec.IvParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 import java.io.FileInputStream;
-import java.security.*;
+import java.security.KeyFactory;
+import java.security.PrivateKey;
+import java.security.PublicKey;
+import java.security.Signature;
 import java.security.interfaces.RSAPrivateKey;
 import java.security.interfaces.RSAPublicKey;
 import java.security.spec.KeySpec;
@@ -79,9 +82,7 @@ public class CryptoStuff {
     }
 
     public static byte[] encryptAES(byte[] key, byte[] message, byte[] iv) throws Exception {
-        MessageDigest digest = MessageDigest.getInstance("SHA-256");
-        byte encKey[] = digest.digest(key);
-        SecretKey secretKey = new SecretKeySpec(encKey, "AES");
+        SecretKey secretKey = new SecretKeySpec(key, "AES");
         Cipher cipher = Cipher.getInstance("AES/CBC/PKCS5Padding");
         IvParameterSpec ivspec = new IvParameterSpec(iv);
         cipher.init(Cipher.ENCRYPT_MODE, secretKey, ivspec);
@@ -91,9 +92,7 @@ public class CryptoStuff {
     }
 
     public static byte[] decryptAES(byte[] key, byte[] message, byte[] iv) throws Exception {
-        MessageDigest digest = MessageDigest.getInstance("SHA-256");
-        byte encKey[] = digest.digest(key);
-        SecretKey secretKey = new SecretKeySpec(encKey, "AES");
+        SecretKey secretKey = new SecretKeySpec(key, "AES");
         Cipher cipher = Cipher.getInstance("AES/CBC/PKCS5Padding");
         IvParameterSpec ivspec = new IvParameterSpec(iv);
         cipher.init(Cipher.DECRYPT_MODE, secretKey, ivspec);
